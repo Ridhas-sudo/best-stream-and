@@ -1,80 +1,15 @@
-name: build
-on: [push]
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Unzip project
-        run: |
-          echo "=== Fichiers à la racine ==="
-          ls -la
-          ZIP=$(find . -maxdepth 1 -name "*.zip" | head -n 1)
-          if [ -z "$ZIP" ]; then
-            echo "::error::Aucun fichier .zip trouvé"
-            exit 1
-          fi
-          echo "ZIP trouvé : $ZIP"
-          unzip -o -q "$ZIP" -d extracted
-          if [ -f extracted/settings.gradle.kts ] || [ -f extracted/settings.gradle ]; then
-            echo "Projet directement dans le zip"
-            cp -a extracted/. .
-          else
-            SUB=$(find extracted -maxdepth 2 \( -name "settings.gradle.kts" -o -name "settings.gradle" \) | head -n 1)
-            if [ -n "$SUB" ]; then
-              DIR=$(dirname "$SUB")
-              echo "Projet dans sous-dossier : $DIR"
-              cp -a "$DIR"/. .
-            else
-              echo "::error::Pas de settings.gradle dans le zip"
-              exit 1
-            fi
-          fi
-          rm -rf extracted
-          ls -la
-
-      - name: Fix experimental API error
+      - name: Build Release APK
         run: |
           FILE=$(find . -name "ChannelListScreen.kt" | head -n 1)
-          echo "Fichier trouvé : $FILE"
-          cat "$FILE" | head -n 5
-          # Ajoute l'OptIn si il n'y est pas déjà
-          if ! grep -q "ExperimentalMaterial3Api" "$FILE"; then
-            sed -i '1i@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)' "$FILE"
-            echo "Patch appliqué"
-          else
-            echo "Déjà patché"
-          fi
-          head -n 3 "$FILE"
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: Ensure Gradle Wrapper
-        run: |
-          if [ ! -f gradlew ]; then
-            gradle wrapper --gradle-version 8.9
-          fi
-          chmod +x gradlew
-
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug --stacktrace --no-daemon
+          # On force V1+V2 dans le build.gradle
+          sed -i 's/v1SigningEnabled false/v1SigningEnabled true/g' app/build.gradle.kts
+          sed -i 's/isV1SigningEnabled = false/isV1SigningEnabled = true/g' app/build.gradle.kts
+          ./gradlew assembleRelease --stacktrace --no-daemon || ./gradlew assembleDebug --stacktrace --no-daemon
 
       - name: Release APK
         uses: softprops/action-gh-release@v1
         with:
-          files: app/build/outputs/apk/debug/*.apk
+          files: |
+            app/build/outputs/apk/release/*.apk
+            app/build/outputs/apk/debug/*.apk
           tag_name: build-${{ github.run_number }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
